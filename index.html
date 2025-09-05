@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Image K-Means Clustering</title>
+  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+  <style>
+  body { font-family: Arial, sans-serif; margin: 20px; }
+  .container { display: flex; gap: 30px; }
+  .column { display: flex; flex-direction: column; align-items: center; }
+  img { max-width: 300px; max-height: 300px; margin-bottom: 10px; }
+  canvas { max-width: 300px; max-height: 300px; margin-bottom: 10px; border: 1px solid #ccc; }
+  #output-img { border: 1px solid #ccc; }
+  </style>
+</head>
+<body>
+  <h2>Image K-Means Clustering Demo</h2>
+  <input type="file" id="img-upload" accept="image/*">
+  <label for="k-input">Number of clusters (k):</label>
+  <input type="number" id="k-input" min="2" max="9" value="3">
+  <button id="run-btn">Run K-Means</button>
+  <div class="container">
+    <div class="column">
+      <h3>Original Image</h3>
+      <img id="orig-img" src="" alt="Original Image">
+    </div>
+    <div class="column">
+      <h3>RGB 3D Scatter (Clustered)</h3>
+      <div id="plot3d" style="width:350px;height:350px;"></div>
+    </div>
+    <div class="column">
+  <h3>Clustered Image</h3>
+  <canvas id="output-canvas" width="300" height="300"></canvas>
+    </div>
+  </div>
+  <canvas id="hidden-canvas" width="300" height="300"></canvas>
+  <script>
+    const imgUpload = document.getElementById('img-upload');
+    const origImg = document.getElementById('orig-img');
+    const runBtn = document.getElementById('run-btn');
+    const kInput = document.getElementById('k-input');
+    const plot3d = document.getElementById('plot3d');
+    const outputCanvas = document.getElementById('output-canvas');
+  // Removed outputImg element
+    const hiddenCanvas = document.getElementById('hidden-canvas');
+    let imgData = null, pixels = [], width = 0, height = 0;
+
+    imgUpload.onchange = function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(ev) {
+        origImg.src = ev.target.result;
+      };
+      reader.readAsDataURL(file);
+    };
+
+    origImg.onload = function() {
+      width = origImg.naturalWidth;
+      height = origImg.naturalHeight;
+      hiddenCanvas.width = width;
+      hiddenCanvas.height = height;
+      const ctx = hiddenCanvas.getContext('2d');
+      ctx.drawImage(origImg, 0, 0, width, height);
+      imgData = ctx.getImageData(0, 0, width, height);
+      pixels = [];
+      for (let i = 0; i < imgData.data.length; i += 4) {
+        pixels.push([
+          imgData.data[i],
+          imgData.data[i+1],
+          imgData.data[i+2]
+        ]);
+      }
+    };
+
+    function kmeans(data, k, maxIter=10) {
+      let centroids = [];
+      for (let i = 0; i < k; i++) centroids.push(data[Math.floor(Math.random()*data.length)]);
+      let assignments = new Array(data.length).fill(0);
+      for (let iter = 0; iter < maxIter; iter++) {
+        for (let i = 0; i < data.length; i++) {
+          let minDist = Infinity, idx = 0;
+          for (let j = 0; j < k; j++) {
+            let d = Math.sqrt(
+              (data[i][0]-centroids[j][0])**2 +
+              (data[i][1]-centroids[j][1])**2 +
+              (data[i][2]-centroids[j][2])**2
+            );
+            if (d < minDist) { minDist = d; idx = j; }
+          }
+          assignments[i] = idx;
+        }
+        let sums = Array(k).fill().map(_ => [0,0,0]);
+        let counts = Array(k).fill(0);
+        for (let i = 0; i < data.length; i++) {
+          let c = assignments[i];
+          sums[c][0] += data[i][0];
+          sums[c][1] += data[i][1];
+          sums[c][2] += data[i][2];
+          counts[c]++;
+        }
+        for (let j = 0; j < k; j++) {
+          if (counts[j] > 0) {
+            centroids[j] = [
+              Math.round(sums[j][0]/counts[j]),
+              Math.round(sums[j][1]/counts[j]),
+              Math.round(sums[j][2]/counts[j])
+            ];
+          }
+        }
+      }
+      return {assignments, centroids};
+    }
+
+    runBtn.onclick = function() {
+      if (!imgData || pixels.length === 0) {
+        alert('Please upload an image first.');
+        return;
+      }
+      const k = Math.max(2, Math.min(9, parseInt(kInput.value)));
+      const {assignments, centroids} = kmeans(pixels, k);
+      // 3D plot (limit to 300 pixels for performance)
+      let xs = [], ys = [], zs = [], colors = [], lines = [];
+      let maxPoints = 300;
+      let step = Math.max(1, Math.floor(pixels.length / maxPoints));
+      for (let i = 0; i < pixels.length && xs.length < maxPoints; i += step) {
+        xs.push(pixels[i][0]);
+        ys.push(pixels[i][1]);
+        zs.push(pixels[i][2]);
+        // Color by original pixel
+        colors.push('rgb(' + pixels[i][0] + ',' + pixels[i][1] + ',' + pixels[i][2] + ')');
+        // Draw line from pixel to centroid
+        let cIdx = assignments[i];
+        let c = centroids[cIdx];
+        lines.push({
+          x: [pixels[i][0], c[0]],
+          y: [pixels[i][1], c[1]],
+          z: [pixels[i][2], c[2]],
+          mode: 'lines',
+          line: {color: 'rgba(0,0,0,0.2)', width: 1},
+          type: 'scatter3d',
+          showlegend: false
+        });
+      }
+      // Centroids
+      let cx = [], cy = [], cz = [], ccolors = [];
+      for (let j = 0; j < k; j++) {
+        cx.push(centroids[j][0]);
+        cy.push(centroids[j][1]);
+        cz.push(centroids[j][2]);
+        ccolors.push('rgb(' + centroids[j][0] + ',' + centroids[j][1] + ',' + centroids[j][2] + ')');
+      }
+      let pixelTrace = {
+        x: xs, y: ys, z: zs,
+        mode: 'markers',
+        marker: { color: colors, size: 3 },
+        type: 'scatter3d',
+        name: 'Pixels'
+      };
+      let centroidTrace = {
+        x: cx, y: cy, z: cz,
+        mode: 'markers',
+        marker: { color: ccolors, size: 10, symbol: 'diamond' },
+        type: 'scatter3d',
+        name: 'Centroids'
+      };
+      Plotly.newPlot(plot3d, [pixelTrace, centroidTrace, ...lines], {
+        margin: {l:0,r:0,b:0,t:0},
+        scene: {
+          xaxis:{title:'R', range:[0,255]},
+          yaxis:{title:'G', range:[0,255]},
+          zaxis:{title:'B', range:[0,255]}
+        }
+      });
+      // Clustered image
+      outputCanvas.width = width;
+      outputCanvas.height = height;
+      const ctx = outputCanvas.getContext('2d');
+      let outImg = ctx.createImageData(width, height);
+      for (let i = 0; i < pixels.length; i++) {
+        let c = centroids[assignments[i]];
+        outImg.data[i*4] = c[0];
+        outImg.data[i*4+1] = c[1];
+        outImg.data[i*4+2] = c[2];
+        outImg.data[i*4+3] = 255;
+      }
+      ctx.putImageData(outImg, 0, 0);
+    };
+  </script>
+  </script>
+</body>
+</html>
